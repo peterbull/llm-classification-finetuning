@@ -1,14 +1,6 @@
-# repos:
-# - repo: https://github.com/fastai/nbdev
-#   rev: 2.2.10
-#   hooks:
-#   - id: uv run nbdev_clean
-#   # - id: nbdev_export
 repos:
-- repo: local
+- repo: https://github.com/fastai/nbdev
+  rev: 2.2.10
   hooks:
   - id: nbdev_clean
-    name: nbdev_clean
-    entry: uv run nbdev_clean
-    language: system
-    files: \.ipynb$
+  # - id: nbdev_export

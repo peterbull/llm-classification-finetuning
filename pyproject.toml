@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "datasets>=3.6.0",
     "fastkaggle>=0.0.8",
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
@@ -13,5 +14,7 @@ dependencies = [
     "numpy>=2.2.6",
     "pandas>=2.2.3",
     "polars>=1.30.0",
+    "rich>=14.0.0",
     "torch>=2.7.0",
+    "transformers>=4.52.4",
 ]
