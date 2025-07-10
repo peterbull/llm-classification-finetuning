@@ -3,7 +3,7 @@ name = "llm-classification-finetuning"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.7.0",
     "datasets>=3.6.0",
@@ -13,7 +13,7 @@ dependencies = [
     "ipywidgets>=8.1.7",
     "kaggle>=1.7.4.5",
     "nbdev>=2.4.2",
-    "numpy>=2.2.6",
+    "numpy<2",
     "pandas>=2.2.3",
     "polars>=1.30.0",
     "rich>=14.0.0",
