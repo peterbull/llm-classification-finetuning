@@ -3,10 +3,11 @@
 # %% auto 0
 __all__ = ['iskaggle', 'isremote', 'WANDB_PROJECT_NAME', 'INPUT_DIR', 'OUTPUT_DIR', 'MODEL_DIR', 'cols', 'df_train', 'df_test',
            'tokenizer', 'model', 'texts', 'dataset', 'dataloader', 'token_counts', 'train_texts', 'val_texts',
-           'train_labels', 'val_labels', 'train_dataset', 'val_dataset', 'test_dataset', 'final_model_path',
-           'timestamp', 'run_name', 'test_run', 'trainer', 'text', 'inputs', 'outputs', 'predictions', 'preds',
-           'all_probabilities', 'test_dataloader', 'final_probs', 'submission_df', 'df_for_kaggle', 'setup_environment',
-           'null_clean', 'apply_bert_fmt', 'TokenizeDataset', 'LLMDataset', 'compute_metrics', 'load_model']
+           'train_labels', 'val_labels', 'train_dataset', 'val_dataset', 'test_dataset', 'train_params',
+           'final_model_path', 'timestamp', 'run_name', 'training_args', 'trainer', 'text', 'inputs', 'outputs',
+           'predictions', 'preds', 'all_probabilities', 'test_dataloader', 'final_probs', 'submission_df',
+           'df_for_kaggle', 'setup_environment', 'null_clean', 'apply_bert_fmt', 'TokenizeDataset', 'LLMDataset',
+           'compute_metrics', 'TrainParams', 'get_train_params', 'load_model']
 
 # %% ../20250709_unsplit_ds.ipynb 2
 import os
@@ -33,6 +34,7 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
 )
+from pydantic import BaseModel
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset as TorchDataset
 import evaluate
@@ -40,6 +42,7 @@ from torch.utils.data import DataLoader
 from datetime import datetime
 import subprocess
 from sklearn.metrics import accuracy_score
+from typing import List, Optional, Dict, Tuple, Union, Literal
 
 # %% ../20250709_unsplit_ds.ipynb 6
 if torch.backends.mps.is_available():
@@ -261,64 +264,86 @@ def compute_metrics(eval_pred):
     return {"accuracy": accuracy_score(labels, preds)}
 
 # %% ../20250709_unsplit_ds.ipynb 46
+class TrainParams(BaseModel):
+  learning_rate: float = 2e-5
+  per_device_train_batch_size: int = 8
+  per_device_eval_batch_size: int = 8
+  num_train_epochs: Optional[int] = 2
+  weight_decay: float = 0.01
+  max_steps: Optional[int] = None
+  eval_strategy: Literal["epoch", "steps", "no"] = "epoch"
+  save_strategy: Literal["no", "steps", "epoch"] = "epoch"
+  load_best_model_at_end: bool = True
+  metric_for_best_model: Literal["accuracy"] = "accuracy"
+  logging_steps: int = 10
+  logging_first_step: bool = False
+  dataloader_num_workers: int = 0 
+
+# %% ../20250709_unsplit_ds.ipynb 47
+def get_train_params() -> TrainParams:
+    """Get training parameters based on environment"""
+    # remote gpu
+    if isremote:
+        return TrainParams(
+            per_device_train_batch_size=64,
+            per_device_eval_batch_size=64,
+            logging_steps=20,
+        )
+    # kaggle 
+    if iskaggle:  
+        return TrainParams(
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
+            load_best_model_at_end=True,
+            save_strategy="no"
+        )
+    # local mps
+    else:      
+        return TrainParams(
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
+            max_steps=100,
+            num_train_epochs=None,  
+            eval_strategy="no",
+            logging_steps=2,
+            save_strategy="no"
+                )
+
+# %% ../20250709_unsplit_ds.ipynb 49
+train_params = get_train_params()
+
+# %% ../20250709_unsplit_ds.ipynb 50
 final_model_path = f"{MODEL_DIR}/final"
 
 timestamp = datetime.now().strftime("%Y%m%d-%H%M")
 run_name = f"bert-classification-{timestamp}"
-test_run = False
-if not iskaggle and test_run:
-    # Quick run to test pipeline
-    training_args = TrainingArguments(
-        output_dir=f"{OUTPUT_DIR}/results",
-        run_name=run_name,
-        learning_rate=2e-5,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        max_steps=2000,
-        weight_decay=0.01,
-        eval_strategy="no",
-        save_strategy="no",
-        load_best_model_at_end=False,
-        metric_for_best_model="accuracy",
-        logging_steps=2,
-        logging_first_step=True,
-        report_to="wandb" if os.environ.get("WANDB_MODE") != "disabled" else [],
-        dataloader_num_workers=0,  # Important for Kaggle compatibility
+
+# %% ../20250709_unsplit_ds.ipynb 51
+if os.environ.get("WANDB_MODE") != "disabled":
+    import wandb
+    
+    tags = [
+        f"lr_{train_params.learning_rate}",
+        f"bs_{train_params.per_device_train_batch_size}",
+        f"epochs_{train_params.num_train_epochs}" if train_params.num_train_epochs else f"steps_{train_params.max_steps}",
+    ]
+
+    wandb.init(
+        project=WANDB_PROJECT_NAME,
+        name=run_name    ,
+        tags=tags
     )
-elif isremote: 
-     training_args = TrainingArguments(
-        output_dir=f"{OUTPUT_DIR}/results",
-        run_name=run_name,
-        learning_rate=2e-5,
-        per_device_train_batch_size=128,
-        per_device_eval_batch_size=128,
-        num_train_epochs=2,
-        weight_decay=0.01,
-        eval_strategy="epoch",
-        save_strategy="no",
-        metric_for_best_model="accuracy",
-        logging_steps=5,
-        logging_first_step=True,
-        report_to="wandb" if os.environ.get("WANDB_MODE") != "disabled" else [],
-        dataloader_num_workers=0,  # Important for Kaggle compatibility
-    ) 
-else:
-    training_args = TrainingArguments(
-        output_dir=f"{OUTPUT_DIR}/results",
-        run_name=run_name,
-        learning_rate=2e-5,
-        per_device_train_batch_size=8,
-        per_device_eval_batch_size=8,
-        num_train_epochs=2,
-        weight_decay=0.01,
-        eval_strategy="epoch",
-        save_strategy="no",
-        metric_for_best_model="accuracy",
-        logging_steps=5,
-        logging_first_step=True,
-        report_to="wandb" if os.environ.get("WANDB_MODE") != "disabled" else [],
-        dataloader_num_workers=0,  # Important for Kaggle compatibility
-    )
+    print(f"🏷️  Tagged run with: {tags}")
+
+# %% ../20250709_unsplit_ds.ipynb 52
+training_args = TrainingArguments(
+    output_dir=f"{OUTPUT_DIR}/results",
+    run_name=run_name,
+    report_to="wandb" if os.environ.get("WANDB_MODE") != "disabled" else [],
+    **train_params.model_dump(exclude_none=True)
+)
+
+# %% ../20250709_unsplit_ds.ipynb 53
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -327,16 +352,19 @@ trainer = Trainer(
     processing_class=tokenizer,
     compute_metrics=compute_metrics,
 )
+
+# %% ../20250709_unsplit_ds.ipynb 54
 trainer.train()
 
-# trainer.save_model(final_model_path)
-# tokenizer.save_pretrained(final_model_path)
+# %% ../20250709_unsplit_ds.ipynb 55
+trainer.save_model(final_model_path)
+tokenizer.save_pretrained(final_model_path)
 # if os.environ.get("WANDB_MODE") != "disabled":
 #     wandb.log({"final_eval": eval_results})
 #     wandb.save(f"{final_model_path}/*")
 # wandb.finish()
 
-# %% ../20250709_unsplit_ds.ipynb 48
+# %% ../20250709_unsplit_ds.ipynb 57
 def load_model(model_path):
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -351,10 +379,10 @@ inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
 outputs = model(**inputs.to(device))
 predictions = outputs.logits
 
-# %% ../20250709_unsplit_ds.ipynb 50
+# %% ../20250709_unsplit_ds.ipynb 59
 preds = F.softmax(predictions, dim=-1)
 
-# %% ../20250709_unsplit_ds.ipynb 52
+# %% ../20250709_unsplit_ds.ipynb 61
 all_probabilities = []
 test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False)
 
@@ -367,7 +395,7 @@ with torch.no_grad():
         all_probabilities.extend(probabilities.cpu().numpy())
 final_probs = np.vstack(all_probabilities)
 
-# %% ../20250709_unsplit_ds.ipynb 55
+# %% ../20250709_unsplit_ds.ipynb 64
 submission_df = df_test
 submission_df = submission_df.with_columns(
     pl.lit(final_probs[:, 0]).alias("winner_model_a"),
@@ -377,9 +405,9 @@ submission_df = submission_df.with_columns(
 submission_df = submission_df[["id", "winner_model_a", "winner_model_b", "winner_tie"]]
 submission_df
 
-# %% ../20250709_unsplit_ds.ipynb 56
+# %% ../20250709_unsplit_ds.ipynb 65
 df_for_kaggle = submission_df.to_pandas()
 
-# %% ../20250709_unsplit_ds.ipynb 57
+# %% ../20250709_unsplit_ds.ipynb 66
 df_for_kaggle.to_csv("submission.csv", index=False)
 df_for_kaggle.head()
