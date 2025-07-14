@@ -1,17 +1,18 @@
 {
   "id": "peterbull/llm-classification-bert-finetuning-no-train",
-  "id_no": 87007644,
   "title": "LLM Classification BERT Finetuning No Train",
   "code_file": "20250713_no_train.ipynb",
   "language": "python",
   "kernel_type": "notebook",
   "is_private": true,
   "enable_gpu": true,
-  "enable_tpu": false,
   "enable_internet": false,
   "dataset_sources": [],
-  "competition_sources": ["llm-classification-finetuning"],
+  "competition_sources": [
+    "competitions/llm-classification-finetuning"
+  ],
+  "kernel_sources": [],
   "model_sources": [
-    "peterbull/bert-chatbot-preference/Transformers/base-uncased-4epochs/1"
+    "peterbull/bert-chatbot-preference"
   ]
 }

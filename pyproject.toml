@@ -12,6 +12,7 @@ dependencies = [
     "ipykernel>=6.29.5",
     "ipywidgets>=8.1.7",
     "kaggle>=1.7.4.5",
+    "kagglehub>=0.3.12",
     "nbdev>=2.4.2",
     "numpy<2",
     "pandas>=2.2.3",
