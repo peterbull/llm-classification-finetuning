@@ -2,12 +2,12 @@
 
 # %% auto 0
 __all__ = ['iskaggle', 'isremote', 'WANDB_PROJECT_NAME', 'INPUT_DIR', 'OUTPUT_DIR', 'MODEL_DIR', 'cols', 'df_train', 'df_test',
-           'tokenizer', 'model', 'texts', 'dataset', 'dataloader', 'token_counts', 'train_texts', 'val_texts',
-           'train_labels', 'val_labels', 'train_dataset', 'val_dataset', 'test_dataset', 'train_params',
+           'model_path', 'tokenizer', 'model', 'texts', 'dataset', 'dataloader', 'token_counts', 'train_texts',
+           'val_texts', 'train_labels', 'val_labels', 'train_dataset', 'val_dataset', 'test_dataset', 'train_params',
            'final_model_path', 'timestamp', 'run_name', 'training_args', 'trainer', 'text', 'inputs', 'outputs',
            'predictions', 'preds', 'all_probabilities', 'test_dataloader', 'final_probs', 'submission_df',
-           'df_for_kaggle', 'setup_environment', 'null_clean', 'apply_bert_fmt', 'TokenizeDataset', 'LLMDataset',
-           'compute_metrics', 'TrainParams', 'get_train_params', 'load_model']
+           'df_for_kaggle', 'setup_environment', 'null_clean', 'apply_bert_fmt', 'parse_args', 'TokenizeDataset',
+           'LLMDataset', 'compute_metrics', 'TrainParams', 'get_train_params', 'load_model']
 
 # %% ../20250709_unsplit_ds.ipynb 2
 import os
@@ -17,6 +17,7 @@ isremote = os.path.exists("/home/ubuntu")
 
 # %% ../20250709_unsplit_ds.ipynb 3
 import wandb
+import argparse
 import os
 import shutil
 import fastkaggle
@@ -175,21 +176,47 @@ df_train = df_train.with_columns(
 df_train = apply_bert_fmt(df_train)
 df_test = apply_bert_fmt(df_test)
 
-# %% ../20250709_unsplit_ds.ipynb 31
-if iskaggle:
-    model_path = "../input/huggingface-bert/bert-base-uncased"
-    print("Loading BERT from Kaggle model input...")
+# %% ../20250709_unsplit_ds.ipynb 32
+def parse_args():
+  parser = argparse.ArgumentParser(description="LLM Classification BERT Finetuning")
+  parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate for training")
+  parser.add_argument("--bs", type=int, default=8, help="Batch size for training")
+  parser.add_argument("--epoch", type=int, default=2, help="Number of training epochs")
+  parser.add_argument("--max_steps", type=int, default=None, help="Maximum training steps")
+  parser.add_argument("--model_path", type=str, default="answerdotai/ModernBERT-base", help="Model path or name")
+  parser.add_argument("--output_dir", type=str, default=None, help="Output directory (overrides default)")
+  parser.add_argument("--disable_wandb", action="store_true", help="Disable wandb logging")
+  parser.add_argument("--max_len", type=int,default=8192, help="Max sequence length for model")
+  parser.add_argument("--bf16", type=bool, default=False, help="Use bf16 precision")
+  parser.add_argument("--fp16", type=bool, default=False, help="Use fp16 precision")
 
+  args, unknown = parser.parse_known_args()
+  return args
+
+if __name__ == "__main__":
+  args = parse_args()
 else:
-    model_path = "bert-base-uncased"
-    print("Loading BERT from Hugging Face...")
+  class Args:
+    lr = 2e-5
+    bs = 8
+    epochs = 2
+    model_path = "answerdotai/ModernBERT-base"
+    max_len = 8192
+    bf16: bool
+    fp16: bool
+
+  args = Args()
+
+# %% ../20250709_unsplit_ds.ipynb 33
+model_path = args.model_path
+print("Loading BERT from Hugging Face...")
 
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForSequenceClassification.from_pretrained(model_path, num_labels=3)
 model.to(device)
 model.device
 
-# %% ../20250709_unsplit_ds.ipynb 32
+# %% ../20250709_unsplit_ds.ipynb 34
 class TokenizeDataset(TorchDataset):
     def __init__(self, texts, tokenizer):
       self.texts = texts
@@ -202,7 +229,7 @@ class TokenizeDataset(TorchDataset):
        tokens = self.tokenizer.tokenize(self.texts[idx])
        return len(tokens)
 
-# %% ../20250709_unsplit_ds.ipynb 33
+# %% ../20250709_unsplit_ds.ipynb 35
 texts = df_train['text'].to_list()
 dataset = TokenizeDataset(texts, tokenizer)
 dataloader = DataLoader(dataset, batch_size=1000, num_workers=4)
@@ -210,19 +237,19 @@ token_counts = []
 for batch in dataloader:
     token_counts.extend(batch.tolist())
 
-# %% ../20250709_unsplit_ds.ipynb 34
+# %% ../20250709_unsplit_ds.ipynb 36
 df_train = df_train.with_columns(pl.Series("token_count", token_counts))
 
-# %% ../20250709_unsplit_ds.ipynb 35
+# %% ../20250709_unsplit_ds.ipynb 37
 # for now just filter anything over the context window
 df_train.filter(pl.col("token_count") < 510)
 
-# %% ../20250709_unsplit_ds.ipynb 36
+# %% ../20250709_unsplit_ds.ipynb 38
 train_texts, val_texts, train_labels, val_labels = train_test_split(
     df_train["text"], df_train["label"], test_size=0.1, random_state=42
 )
 
-# %% ../20250709_unsplit_ds.ipynb 42
+# %% ../20250709_unsplit_ds.ipynb 44
 class LLMDataset(torch.utils.data.Dataset):
     def __init__(self, texts, tokenizer, labels=None, max_length=512):
         self.texts = texts
@@ -252,18 +279,18 @@ class LLMDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.texts)
 
-# %% ../20250709_unsplit_ds.ipynb 43
-train_dataset = LLMDataset(list(train_texts), tokenizer, list(train_labels))
-val_dataset = LLMDataset(list(val_texts), tokenizer, list(val_labels))
-test_dataset = LLMDataset(list(df_test["text"]), tokenizer)
+# %% ../20250709_unsplit_ds.ipynb 45
+train_dataset = LLMDataset(list(train_texts), tokenizer, list(train_labels), max_length=args.max_len)
+val_dataset = LLMDataset(list(val_texts), tokenizer, list(val_labels), max_length=args.max_len)
+test_dataset = LLMDataset(list(df_test["text"]), tokenizer, max_length=args.max_len )
 
-# %% ../20250709_unsplit_ds.ipynb 44
+# %% ../20250709_unsplit_ds.ipynb 46
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
     return {"accuracy": accuracy_score(labels, preds)}
 
-# %% ../20250709_unsplit_ds.ipynb 46
+# %% ../20250709_unsplit_ds.ipynb 48
 class TrainParams(BaseModel):
   learning_rate: float = 2e-5
   per_device_train_batch_size: int = 8
@@ -278,51 +305,56 @@ class TrainParams(BaseModel):
   logging_steps: int = 10
   logging_first_step: bool = False
   dataloader_num_workers: int = 0 
+  bf16: bool = False
+  fp16: bool = False
 
-# %% ../20250709_unsplit_ds.ipynb 47
+# %% ../20250709_unsplit_ds.ipynb 49
 def get_train_params() -> TrainParams:
     """Get training parameters based on environment"""
     # remote gpu
     if isremote:
         return TrainParams(
-            per_device_train_batch_size=64,
-            per_device_eval_batch_size=64,
+            learning_rate=args.lr,
+            per_device_train_batch_size=args.bs,
+            per_device_eval_batch_size=args.bs,
             logging_steps=20,
+            bf16=args.bf16
         )
     # kaggle 
     if iskaggle:  
         return TrainParams(
-            per_device_train_batch_size=8,
-            per_device_eval_batch_size=8,
+            per_device_train_batch_size=args.bs,
+            per_device_eval_batch_size=args.bs,
             load_best_model_at_end=True,
-            save_strategy="no"
+            save_strategy="no",
         )
     # local mps
     else:      
         return TrainParams(
-            per_device_train_batch_size=8,
-            per_device_eval_batch_size=8,
+            per_device_train_batch_size=args.bs,
+            per_device_eval_batch_size=args.bs,
             max_steps=100,
             num_train_epochs=None,  
             eval_strategy="no",
             logging_steps=2,
-            save_strategy="no"
+            save_strategy="no",
                 )
 
-# %% ../20250709_unsplit_ds.ipynb 49
+# %% ../20250709_unsplit_ds.ipynb 51
 train_params = get_train_params()
 
-# %% ../20250709_unsplit_ds.ipynb 50
+# %% ../20250709_unsplit_ds.ipynb 52
 final_model_path = f"{MODEL_DIR}/final"
 
 timestamp = datetime.now().strftime("%Y%m%d-%H%M")
 run_name = f"bert-classification-{timestamp}"
 
-# %% ../20250709_unsplit_ds.ipynb 51
+# %% ../20250709_unsplit_ds.ipynb 53
 if os.environ.get("WANDB_MODE") != "disabled":
     import wandb
     
     tags = [
+        f"model_{args.model_path.split('/')[-1]}",
         f"lr_{train_params.learning_rate}",
         f"bs_{train_params.per_device_train_batch_size}",
         f"epochs_{train_params.num_train_epochs}" if train_params.num_train_epochs else f"steps_{train_params.max_steps}",
@@ -335,7 +367,7 @@ if os.environ.get("WANDB_MODE") != "disabled":
     )
     print(f"🏷️  Tagged run with: {tags}")
 
-# %% ../20250709_unsplit_ds.ipynb 52
+# %% ../20250709_unsplit_ds.ipynb 54
 training_args = TrainingArguments(
     output_dir=f"{OUTPUT_DIR}/results",
     run_name=run_name,
@@ -343,7 +375,7 @@ training_args = TrainingArguments(
     **train_params.model_dump(exclude_none=True)
 )
 
-# %% ../20250709_unsplit_ds.ipynb 53
+# %% ../20250709_unsplit_ds.ipynb 55
 trainer = Trainer(
     model=model,
     args=training_args,
@@ -353,10 +385,10 @@ trainer = Trainer(
     compute_metrics=compute_metrics,
 )
 
-# %% ../20250709_unsplit_ds.ipynb 54
+# %% ../20250709_unsplit_ds.ipynb 56
 trainer.train()
 
-# %% ../20250709_unsplit_ds.ipynb 55
+# %% ../20250709_unsplit_ds.ipynb 57
 trainer.save_model(final_model_path)
 tokenizer.save_pretrained(final_model_path)
 # if os.environ.get("WANDB_MODE") != "disabled":
@@ -364,7 +396,7 @@ tokenizer.save_pretrained(final_model_path)
 #     wandb.save(f"{final_model_path}/*")
 # wandb.finish()
 
-# %% ../20250709_unsplit_ds.ipynb 57
+# %% ../20250709_unsplit_ds.ipynb 59
 def load_model(model_path):
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     tokenizer = AutoTokenizer.from_pretrained(model_path)
@@ -379,10 +411,10 @@ inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True)
 outputs = model(**inputs.to(device))
 predictions = outputs.logits
 
-# %% ../20250709_unsplit_ds.ipynb 59
+# %% ../20250709_unsplit_ds.ipynb 61
 preds = F.softmax(predictions, dim=-1)
 
-# %% ../20250709_unsplit_ds.ipynb 61
+# %% ../20250709_unsplit_ds.ipynb 63
 all_probabilities = []
 test_dataloader = DataLoader(test_dataset, batch_size=16, shuffle=False)
 
@@ -395,7 +427,7 @@ with torch.no_grad():
         all_probabilities.extend(probabilities.cpu().numpy())
 final_probs = np.vstack(all_probabilities)
 
-# %% ../20250709_unsplit_ds.ipynb 64
+# %% ../20250709_unsplit_ds.ipynb 66
 submission_df = df_test
 submission_df = submission_df.with_columns(
     pl.lit(final_probs[:, 0]).alias("winner_model_a"),
@@ -405,9 +437,9 @@ submission_df = submission_df.with_columns(
 submission_df = submission_df[["id", "winner_model_a", "winner_model_b", "winner_tie"]]
 submission_df
 
-# %% ../20250709_unsplit_ds.ipynb 65
+# %% ../20250709_unsplit_ds.ipynb 67
 df_for_kaggle = submission_df.to_pandas()
 
-# %% ../20250709_unsplit_ds.ipynb 66
+# %% ../20250709_unsplit_ds.ipynb 68
 df_for_kaggle.to_csv("submission.csv", index=False)
 df_for_kaggle.head()
